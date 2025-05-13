@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import json
 import time
+import io  # Moved to top for consistency
 
 # Configure the page
 st.set_page_config(
@@ -47,27 +48,23 @@ API_URL = "https://zzatem.com/api/get-user-data"
 # Sidebar for API configuration
 with st.sidebar:
     st.markdown('<p class="sub-header">API Configuration</p>', unsafe_allow_html=True)
-    
-    # Access token input
+
     access_token = st.text_input("Access Token", type="password")
-    
-    # Save token to session state if user wants
+
     if 'access_token' not in st.session_state:
         st.session_state.access_token = ""
-    
+
     if access_token:
         save_token = st.checkbox("Remember token for this session", value=True)
         if save_token:
             st.session_state.access_token = access_token
-    
-    # Use saved token if available
+
     if not access_token and st.session_state.access_token:
         access_token = st.session_state.access_token
         st.info("Using saved access token")
-    
+
     st.markdown("---")
-    
-    # Advanced options
+
     with st.expander("Advanced Options"):
         request_timeout = st.slider("Request Timeout (seconds)", 5, 60, 30)
         max_retries = st.slider("Max Retries", 0, 5, 2)
@@ -76,24 +73,21 @@ with st.sidebar:
 # Main form for data fetching
 with st.form("user_data_form"):
     st.markdown('<p class="sub-header">Fetch User Data</p>', unsafe_allow_html=True)
-    
-    # User ID input
+
     user_id = st.number_input("User ID", min_value=1, step=1, value=1)
-    
-    # Data selection
+
     st.write("Select data to fetch:")
     col1, col2 = st.columns(2)
-    
+
     with col1:
         fetch_user_data = st.checkbox("User Data", value=True)
         fetch_followers = st.checkbox("Followers")
         fetch_following = st.checkbox("Following")
-    
+
     with col2:
         fetch_liked_pages = st.checkbox("Liked Pages")
         fetch_joined_groups = st.checkbox("Joined Groups")
-    
-    # Submit button
+
     submit_button = st.form_submit_button("Fetch Data")
 
 # Handle form submission
@@ -101,90 +95,69 @@ if submit_button:
     if not access_token:
         st.error("Please enter an access token in the sidebar")
     else:
-        # Prepare fetch parameter
         fetch_items = []
-        if fetch_user_data:
-            fetch_items.append("user_data")
-        if fetch_followers:
-            fetch_items.append("followers")
-        if fetch_following:
-            fetch_items.append("following")
-        if fetch_liked_pages:
-            fetch_items.append("liked_pages")
-        if fetch_joined_groups:
-            fetch_items.append("joined_groups")
-        
+        if fetch_user_data: fetch_items.append("user_data")
+        if fetch_followers: fetch_items.append("followers")
+        if fetch_following: fetch_items.append("following")
+        if fetch_liked_pages: fetch_items.append("liked_pages")
+        if fetch_joined_groups: fetch_items.append("joined_groups")
+
         if not fetch_items:
             st.error("Please select at least one data type to fetch")
         else:
-            # Prepare request data
-            fetch_param = ",".join(fetch_items)
             payload = {
                 "user_id": int(user_id),
-                "fetch": fetch_param
+                "fetch": ",".join(fetch_items)
             }
-            
-            params = {
-                "access_token": access_token
-            }
-            
-            # Show loading spinner
+            params = {"access_token": access_token}
+
             with st.spinner("Fetching data from Woowoder API..."):
                 try:
-                    # Configure session with retries
                     session = requests.Session()
                     retries = requests.packages.urllib3.util.retry.Retry(
                         total=max_retries,
                         backoff_factor=0.5
                     )
-                    session.mount('https://', requests.adapters.HTTPAdapter(max_retries=retries))
-                    
-                    # Make the API request
+                    adapter = requests.adapters.HTTPAdapter(max_retries=retries)
+                    session.mount('https://', adapter)
+
                     start_time = time.time()
                     response = session.post(
-                        API_URL, 
-                        params=params, 
+                        API_URL,
+                        params=params,
                         data=payload,
                         timeout=request_timeout
                     )
                     request_time = time.time() - start_time
-                    
+
                     if response.status_code == 200:
                         data = response.json()
-                        
-                        # Show raw JSON if requested
+
                         if show_raw_json:
                             with st.expander("Raw JSON Response"):
                                 st.json(data)
-                        
+
                         if data.get("api_status") == 200:
-                            # Display success message
                             st.markdown(
-                                f'<div class="success-message">Data fetched successfully in {request_time:.2f} seconds!</div>', 
+                                f'<div class="success-message">Data fetched successfully in {request_time:.2f} seconds!</div>',
                                 unsafe_allow_html=True
                             )
-                            
-                            # Create tabs for each data type
+
                             if len(fetch_items) > 1:
                                 tabs = st.tabs([item.replace('_', ' ').title() for item in fetch_items])
                             else:
-                                tabs = [st]  # If only one data type, don't create tabs
-                            
-                            # Process and display each requested data type
+                                tabs = [st.container()]
+
                             for i, item in enumerate(fetch_items):
                                 if item in data:
-                                    tab = tabs[i] if len(fetch_items) > 1 else tabs[0]
-                                    
-                                    with tab:
+                                    with tabs[i]:
                                         st.markdown(f"### {item.replace('_', ' ').title()}")
-                                        
-                                        # Convert to dataframe
+
                                         if isinstance(data[item], list):
-                                            if data[item]:  # Check if list is not empty
+                                            if data[item]:
                                                 df = pd.DataFrame(data[item])
                                                 st.dataframe(df, use_container_width=True)
-                                                
-                                                # Add download buttons
+
                                                 col1, col2 = st.columns(2)
                                                 with col1:
                                                     csv = df.to_csv(index=False).encode('utf-8')
@@ -195,15 +168,12 @@ if submit_button:
                                                         "text/csv",
                                                         key=f"download_csv_{item}"
                                                     )
-                                                
+
                                                 with col2:
-                                                    # For Excel, we need to use BytesIO
-                                                    import io
                                                     buffer = io.BytesIO()
                                                     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                                                        df.to_excel(writer, index=False, sheet_name=item)
+                                                        df.to_excel(writer, index=False, sheet_name=item[:31])
                                                     buffer.seek(0)
-                                                    
                                                     st.download_button(
                                                         f"Download as Excel",
                                                         buffer,
@@ -216,8 +186,7 @@ if submit_button:
                                         elif isinstance(data[item], dict):
                                             df = pd.DataFrame([data[item]])
                                             st.dataframe(df, use_container_width=True)
-                                            
-                                            # Add download buttons
+
                                             col1, col2 = st.columns(2)
                                             with col1:
                                                 csv = df.to_csv(index=False).encode('utf-8')
@@ -228,7 +197,7 @@ if submit_button:
                                                     "text/csv",
                                                     key=f"download_csv_{item}"
                                                 )
-                                            
+
                                             with col2:
                                                 json_str = json.dumps(data[item], indent=2)
                                                 st.download_button(
@@ -240,8 +209,6 @@ if submit_button:
                                                 )
                                         else:
                                             st.json(data[item])
-                                            
-                                            # Add download button for JSON
                                             json_str = json.dumps(data[item], indent=2)
                                             st.download_button(
                                                 f"Download as JSON",
@@ -250,12 +217,12 @@ if submit_button:
                                                 "application/json",
                                                 key=f"download_json_{item}"
                                             )
-                            
-                            # Add download button for all data
+
+                            # Combined export
                             st.markdown("---")
                             st.markdown("### Download Complete Dataset")
-                            
                             col1, col2 = st.columns(2)
+
                             with col1:
                                 all_data_json = json.dumps(data, indent=2)
                                 st.download_button(
@@ -265,21 +232,17 @@ if submit_button:
                                     "application/json",
                                     key="download_all_json"
                                 )
-                            
+
                             with col2:
-                                # Create a combined Excel file with multiple sheets
                                 buffer = io.BytesIO()
                                 with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                                     for item in fetch_items:
                                         if item in data:
                                             if isinstance(data[item], list) and data[item]:
-                                                df = pd.DataFrame(data[item])
-                                                df.to_excel(writer, sheet_name=item[:31], index=False)  # Excel sheet names limited to 31 chars
+                                                pd.DataFrame(data[item]).to_excel(writer, sheet_name=item[:31], index=False)
                                             elif isinstance(data[item], dict):
-                                                df = pd.DataFrame([data[item]])
-                                                df.to_excel(writer, sheet_name=item[:31], index=False)
+                                                pd.DataFrame([data[item]]).to_excel(writer, sheet_name=item[:31], index=False)
                                 buffer.seek(0)
-                                
                                 st.download_button(
                                     "Download All Data (Excel)",
                                     buffer,
@@ -293,40 +256,9 @@ if submit_button:
                         st.error(f"Request failed with status code: {response.status_code}")
                         if response.text:
                             st.code(response.text)
-                
                 except requests.exceptions.Timeout:
                     st.error(f"Request timed out after {request_timeout} seconds. Try increasing the timeout in Advanced Options.")
                 except requests.exceptions.ConnectionError:
-                    st.error("Connection error. Please check your internet connection and the API endpoint.")
+                    st.error("A connection error occurred. Please check your internet connection or API URL.")
                 except Exception as e:
-                    st.error(f"An error occurred: {str(e)}")
-
-# Help section
-with st.expander("How to use the Woowoder API Client"):
-    st.markdown("""
-    ### Instructions:
-    
-    1. Enter your Woowoder API access token in the sidebar
-    2. Enter the user ID you want to fetch data for
-    3. Select the types of data you want to fetch
-    4. Click "Fetch Data"
-    5. View the data in the tabs and download in your preferred format
-    
-    ### API Endpoint:
-    
-### Required Parameters:
-
-- `user_id` (int): The ID of the user to fetch data for
-- `fetch` (string): Comma-separated list of data types to fetch (user_data, followers, following, liked_pages, joined_groups)
-
-### Response Format:
-
-```json
-{
-  "api_status": 200,
-  "user_data": { ... },
-  "followers": [ ... ],
-  "following": [ ... ],
-  "liked_pages": [ ... ],
-  "joined_groups": [ ... ]
-} 
+                    st.error(f"An unexpected error occurred: {str(e)}")
