@@ -2,36 +2,43 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
-import time
-import os
 
-st.set_page_config(page_title="User Data Viewer", layout="wide")
+st.set_page_config(page_title="API Data Downloader", layout="wide")
 
-# Sidebar for API credentials
-st.sidebar.title("API Credentials")
-api_url = st.sidebar.text_input("API URL", "http://your-site.com/api/get-user-data")
-access_token = st.sidebar.text_input("Access Token", type="password")
+st.title("API Data Downloader")
+st.write("Fetch and download user data from the API")
 
-# Main content
-st.title("User Data Viewer and CSV Exporter")
+# API endpoint
+API_URL = "https://zzatem.com/api/get-user-data"
 
-# User input form
-with st.form("user_data_form"):
+# Create a form for the API parameters
+with st.form("api_form"):
+    # Access token input
+    access_token = st.text_input("Access Token", type="password")
+    
+    # User ID input
     user_id = st.number_input("User ID", min_value=1, step=1)
     
+    # Data to fetch checkboxes
     st.write("Select data to fetch:")
-    fetch_user_data = st.checkbox("User Data", value=True)
-    fetch_followers = st.checkbox("Followers")
-    fetch_following = st.checkbox("Following")
-    fetch_liked_pages = st.checkbox("Liked Pages")
-    fetch_joined_groups = st.checkbox("Joined Groups")
+    col1, col2 = st.columns(2)
     
-    submitted = st.form_submit_button("Fetch Data")
+    with col1:
+        fetch_user_data = st.checkbox("User Data", value=True)
+        fetch_followers = st.checkbox("Followers")
+        fetch_following = st.checkbox("Following")
+    
+    with col2:
+        fetch_liked_pages = st.checkbox("Liked Pages")
+        fetch_joined_groups = st.checkbox("Joined Groups")
+    
+    # Submit button
+    submit_button = st.form_submit_button("Fetch Data")
 
-# Process form submission
-if submitted:
+# Handle form submission
+if submit_button:
     if not access_token:
-        st.error("Please enter an access token in the sidebar.")
+        st.error("Please enter an access token")
     else:
         # Prepare fetch parameter
         fetch_items = []
@@ -47,7 +54,7 @@ if submitted:
             fetch_items.append("joined_groups")
         
         if not fetch_items:
-            st.error("Please select at least one data type to fetch.")
+            st.error("Please select at least one data type to fetch")
         else:
             # Prepare request data
             fetch_param = ",".join(fetch_items)
@@ -63,14 +70,15 @@ if submitted:
             # Show loading spinner
             with st.spinner("Fetching data..."):
                 try:
-                    response = requests.post(api_url, params=params, data=payload)
+                    # Make the API request
+                    response = requests.post(API_URL, params=params, data=payload)
                     
                     if response.status_code == 200:
                         data = response.json()
                         
                         if data.get("api_status") == 200:
-                            # Store all dataframes
-                            dataframes = {}
+                            # Display success message
+                            st.success("Data fetched successfully!")
                             
                             # Process and display each requested data type
                             for item in fetch_items:
@@ -79,49 +87,56 @@ if submitted:
                                     
                                     # Convert to dataframe
                                     if isinstance(data[item], list):
-                                        df = pd.DataFrame(data[item])
+                                        if data[item]:  # Check if list is not empty
+                                            df = pd.DataFrame(data[item])
+                                            st.dataframe(df)
+                                            
+                                            # Add download button
+                                            csv = df.to_csv(index=False).encode('utf-8')
+                                            st.download_button(
+                                                f"Download {item.replace('_', ' ').title()} CSV",
+                                                csv,
+                                                f"user_{user_id}_{item}.csv",
+                                                "text/csv",
+                                                key=f"download_{item}"
+                                            )
+                                        else:
+                                            st.info(f"No {item.replace('_', ' ')} data available")
                                     elif isinstance(data[item], dict):
                                         df = pd.DataFrame([data[item]])
+                                        st.dataframe(df)
+                                        
+                                        # Add download button
+                                        csv = df.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            f"Download {item.replace('_', ' ').title()} CSV",
+                                            csv,
+                                            f"user_{user_id}_{item}.csv",
+                                            "text/csv",
+                                            key=f"download_{item}"
+                                        )
                                     else:
-                                        st.write(data[item])
-                                        continue
-                                    
-                                    # Store dataframe for export
-                                    dataframes[item] = df
-                                    
-                                    # Display dataframe
-                                    st.dataframe(df)
-                                    
-                                    # Add download button for each dataframe
-                                    csv = df.to_csv(index=False).encode('utf-8')
-                                    st.download_button(
-                                        f"Download {item} CSV",
-                                        csv,
-                                        f"user_{user_id}_{item}.csv",
-                                        "text/csv",
-                                        key=f"download_{item}"
-                                    )
+                                        st.json(data[item])
+                                        
+                                        # Add download button for JSON
+                                        json_str = json.dumps(data[item], indent=2)
+                                        st.download_button(
+                                            f"Download {item.replace('_', ' ').title()} JSON",
+                                            json_str,
+                                            f"user_{user_id}_{item}.json",
+                                            "application/json",
+                                            key=f"download_{item}"
+                                        )
                             
-                            # Option to download all data as a single CSV
-                            if len(dataframes) > 1:
-                                st.subheader("Export All Data")
-                                
-                                # Create a directory for combined exports
-                                export_dir = "exports"
-                                os.makedirs(export_dir, exist_ok=True)
-                                
-                                # Generate timestamp for unique filename
-                                timestamp = int(time.time())
-                                combined_filename = f"{export_dir}/user_{user_id}_all_data_{timestamp}.csv"
-                                
-                                # Save all dataframes to separate CSV files
-                                for name, df in dataframes.items():
-                                    df.to_csv(f"{export_dir}/user_{user_id}_{name}_{timestamp}.csv", index=False)
-                                
-                                st.success(f"All data exported to {export_dir} directory")
-                                
-                                # For large datasets, provide info on where to find the files
-                                st.info("For large datasets (>10,000 records), check the exports folder in your app directory.")
+                            # Add download button for all data
+                            all_data_json = json.dumps(data, indent=2)
+                            st.download_button(
+                                "Download All Data (JSON)",
+                                all_data_json,
+                                f"user_{user_id}_all_data.json",
+                                "application/json",
+                                key="download_all"
+                            )
                         else:
                             st.error(f"API returned an error: {data.get('error_message', 'Unknown error')}")
                     else:
@@ -131,13 +146,15 @@ if submitted:
                     st.error(f"An error occurred: {str(e)}")
 
 # Add instructions
-with st.expander("How to use this app"):
+with st.expander("How to use"):
     st.markdown("""
-    1. Enter your API URL and access token in the sidebar
+    ### Instructions:
+    
+    1. Enter your access token
     2. Enter the user ID you want to fetch data for
     3. Select the types of data you want to fetch
-    4. Click "Fetch Data" to retrieve the information
-    5. View the data and download as CSV
+    4. Click "Fetch Data"
+    5. View the data and download as CSV or JSON
     
-    For large datasets (over 10,000 records), the app will save files to the 'exports' directory.
-    """)
+    ### API Endpoint:
+    
