@@ -2,76 +2,44 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.title("WooWoder API Scraper")
+st.title("Zzatem Multi-User Data Scraper")
 
-# API URL input
-api_url = st.text_input("API URL", "https://api.woowoder.com/fetch")
+# Input API endpoint and access token
+base_url = st.text_input("Base API URL", "https://zzatem.com/api/v2/api/get-many-users-data")
+access_token = st.text_input("Access Token", type="password")
 
-# Checkbox to toggle between specific user or all users
-fetch_all_users = st.checkbox("Fetch All Users", value=False)
+# Input user IDs
+user_ids_input = st.text_area("Enter User IDs (comma-separated)", "1,2,3,4,5")
 
-# Optional User ID input
-user_id = None
-if not fetch_all_users:
-    user_id = st.number_input("User ID", min_value=1, step=1, value=1)
-
-# Items to fetch
-fetch_items = st.multiselect(
-    "Select items to fetch",
-    ["profiles", "orders", "payments", "subscriptions", "messages", "referrals", "stats"],
-    default=["profiles"]
-)
-
-# API Key
-api_key = st.text_input("API Key", type="password")
-
-# Fetch button
 if st.button("Fetch Data"):
-    if not api_url or not fetch_items:
-        st.error("API URL and at least one fetch item are required.")
+    if not user_ids_input.strip():
+        st.error("Please enter at least one user ID.")
     else:
-        # Prepare request payload
-        fetch_param = ",".join(fetch_items)
-        payload = {
-            "fetch": fetch_param
-        }
-        if not fetch_all_users:
-            payload["user_id"] = int(user_id)
+        # Prepare request
+        user_ids_clean = ",".join([uid.strip() for uid in user_ids_input.split(",") if uid.strip().isdigit()])
+        post_data = {"user_ids": user_ids_clean}
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
+        # Build full URL with access token
+        full_url = f"{base_url}?access_token={access_token}"
 
         try:
-            response = requests.post(api_url, json=payload, headers=headers)
+            response = requests.post(full_url, data=post_data)
             response.raise_for_status()
-            data = response.json()
+            result = response.json()
 
-            if not isinstance(data, dict):
-                st.error("Invalid response format from API.")
+            if result.get("api_status") == 200 and "users" in result:
+                users = result["users"]
+                if users:
+                    df = pd.DataFrame(users)
+                    st.success(f"Fetched {len(users)} users.")
+                    st.dataframe(df)
+
+                    # Download button
+                    csv = df.to_csv(index=False).encode("utf-8")
+                    st.download_button("Download CSV", csv, "zzatem_users.csv", "text/csv")
+                else:
+                    st.warning("No user data returned.")
             else:
-                for item in fetch_items:
-                    item_data = data.get(item)
-                    if item_data:
-                        df = pd.DataFrame(item_data)
-                        st.subheader(f"{item.capitalize()} Data")
-                        st.dataframe(df)
-
-                        # File name
-                        user_label = f"user_{user_id}" if user_id else "all_users"
-                        csv_filename = f"woowoder_{user_label}_{item}.csv"
-                        csv = df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label=f"Download {item} CSV",
-                            data=csv,
-                            file_name=csv_filename,
-                            mime='text/csv'
-                        )
-                    else:
-                        st.warning(f"No data returned for '{item}'.")
-        except requests.RequestException as e:
-            st.error(f"Request failed: {e}")
-        except ValueError:
-            st.error("Failed to parse API response.")
-
+                st.error(f"API Error: {result.get('error', 'Unknown error')}")
+        except Exception as e:
+            st.error(f"Failed to fetch data: {e}")
