@@ -197,12 +197,16 @@ if submit_button:
                                                     )
                                                 
                                                 with col2:
-                                                    excel_buffer = pd.ExcelWriter(f"woowoder_user_{user_id}_{item}.xlsx", engine='xlsxwriter')
-                                                    df.to_excel(excel_buffer, index=False, sheet_name=item)
-                                                    excel_data = excel_buffer.book.close()
+                                                    # For Excel, we need to use BytesIO
+                                                    import io
+                                                    buffer = io.BytesIO()
+                                                    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                                        df.to_excel(writer, index=False, sheet_name=item)
+                                                    buffer.seek(0)
+                                                    
                                                     st.download_button(
                                                         f"Download as Excel",
-                                                        excel_data,
+                                                        buffer,
                                                         f"woowoder_user_{user_id}_{item}.xlsx",
                                                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                                         key=f"download_excel_{item}"
@@ -264,21 +268,21 @@ if submit_button:
                             
                             with col2:
                                 # Create a combined Excel file with multiple sheets
-                                combined_excel = pd.ExcelWriter(f"woowoder_user_{user_id}_all_data.xlsx", engine='xlsxwriter')
+                                buffer = io.BytesIO()
+                                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                    for item in fetch_items:
+                                        if item in data:
+                                            if isinstance(data[item], list) and data[item]:
+                                                df = pd.DataFrame(data[item])
+                                                df.to_excel(writer, sheet_name=item[:31], index=False)  # Excel sheet names limited to 31 chars
+                                            elif isinstance(data[item], dict):
+                                                df = pd.DataFrame([data[item]])
+                                                df.to_excel(writer, sheet_name=item[:31], index=False)
+                                buffer.seek(0)
                                 
-                                for item in fetch_items:
-                                    if item in data:
-                                        if isinstance(data[item], list) and data[item]:
-                                            df = pd.DataFrame(data[item])
-                                            df.to_excel(combined_excel, sheet_name=item[:31], index=False)  # Excel sheet names limited to 31 chars
-                                        elif isinstance(data[item], dict):
-                                            df = pd.DataFrame([data[item]])
-                                            df.to_excel(combined_excel, sheet_name=item[:31], index=False)
-                                
-                                excel_data = combined_excel.book.close()
                                 st.download_button(
                                     "Download All Data (Excel)",
-                                    excel_data,
+                                    buffer,
                                     f"woowoder_user_{user_id}_all_data.xlsx",
                                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key="download_all_excel"
@@ -310,3 +314,19 @@ with st.expander("How to use the Woowoder API Client"):
     
     ### API Endpoint:
     
+### Required Parameters:
+
+- `user_id` (int): The ID of the user to fetch data for
+- `fetch` (string): Comma-separated list of data types to fetch (user_data, followers, following, liked_pages, joined_groups)
+
+### Response Format:
+
+```json
+{
+  "api_status": 200,
+  "user_data": { ... },
+  "followers": [ ... ],
+  "following": [ ... ],
+  "liked_pages": [ ... ],
+  "joined_groups": [ ... ]
+} 
